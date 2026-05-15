@@ -1,0 +1,15 @@
+Building prefix dict from the default dictionary ...
+Loading model from cache C:\Users\admin\AppData\Local\Temp\jieba.cache
+Loading model cost 0.849 seconds.
+Prefix dict has been built successfully.
+INFO:     Started server process [24072]
+INFO:     Waiting for application startup.
+2026-05-15 15:05:31.552 | INFO     | app.main:lifespan:16 - 启动 Video2Knowledge v1.0.0
+2026-05-15 15:05:31.553 | INFO     | app.main:lifespan:25 - 工作目录就绪: D:\Users\admin\Desktop\简历准备\video2knowledge\backend\downloads
+2026-05-15 15:05:31.554 | INFO     | app.main:lifespan:25 - 工作目录就绪: D:\Users\admin\Desktop\简历准备\video2knowledge\backend\output
+2026-05-15 15:05:31.554 | INFO     | app.main:lifespan:25 - 工作目录就绪: D:\Users\admin\Desktop\简历准备\video2knowledge\backend\temp
+2026-05-15 15:05:31.554 | INFO     | app.main:lifespan:25 - 工作目录就绪: D:\Users\admin\Desktop\简历准备\video2knowledge\backend\models
+2026-05-15 15:05:31.555 | INFO     | app.main:lifespan:27 - API地址: http://0.0.0.0:8000/api/v1
+2026-05-15 15:05:31.555 | INFO     | app.main:lifespan:28 - API文档: http://0.0.0.0:8000/docs
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)

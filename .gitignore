@@ -12,7 +12,9 @@ downloads/
 output/
 temp/
 .venv/
+.venv-nopip/
 venv/
+.tmp/
 .idea/
 .vscode/
 *.swp
@@ -25,6 +27,7 @@ frontend/dist/
 frontend/build/
 *.whl
 .pytest_cache/
+pytest-cache-files-*/
 .mypy_cache/
 .coverage
 htmlcov/
