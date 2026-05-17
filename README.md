@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python">
+  <img src="https://img.shields.io/badge/python-3.14.5-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
   <img src="https://img.shields.io/badge/whisper-medium-orange.svg" alt="Whisper">
   <img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker">
@@ -34,7 +34,7 @@
 
 ### 环境要求
 
-- Python 3.11+
+- Python 3.14.5
 - FFmpeg（音视频处理必需）
 - CUDA 12.x（可选，GPU加速推荐）
 - 8GB+ 内存（Medium模型需要约5GB VRAM）

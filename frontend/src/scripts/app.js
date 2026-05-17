@@ -1,4 +1,6 @@
 const API_BASE = '/api/v1';
+const SUBTITLE_SUFFIXES = ['.srt', '.ass', '.ssa', '.vtt', '.json'];
+const TIMED_MEDIA_SUFFIXES = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.flv', '.mp3', '.wav', '.m4a', '.flac', '.aac', '.ogg'];
 
 let activeTaskId = null;
 let pollInterval = null;
@@ -35,8 +37,18 @@ function initProcessForm() {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        const url = document.getElementById('video-url').value.trim();
-        if (!url) return;
+        const mediaFile = document.getElementById('media-file').files[0];
+        const subtitleFile = document.getElementById('subtitle-file').files[0];
+        if (!mediaFile) {
+            showError('请上传字幕文件，或上传视频文件并同时选择字幕文件。');
+            return;
+        }
+
+        const mediaSuffix = getFileSuffix(mediaFile.name);
+        if (TIMED_MEDIA_SUFFIXES.includes(mediaSuffix) && !subtitleFile) {
+            showError('稳定模式需要字幕文件：请同时上传 .srt/.vtt/.ass/.json 字幕。');
+            return;
+        }
 
         const btn = document.getElementById('process-btn');
         btn.disabled = true;
@@ -51,22 +63,26 @@ function initProcessForm() {
             exportFormats.push(cb.value);
         });
 
-        const payload = {
-            url: url,
-            language: document.getElementById('language').value,
-            asr_model_size: document.getElementById('asr-model').value,
-            summarization_method: document.getElementById('summary-method').value,
-            use_asr: document.getElementById('use-asr').checked,
-            generate_mindmap: document.getElementById('generate-mindmap').checked,
-            export_formats: exportFormats,
-        };
-
         try {
-            const resp = await fetch(`${API_BASE}/video/process`, {
+            const formData = new FormData();
+            formData.append('file', mediaFile);
+            if (subtitleFile) {
+                formData.append('subtitle_file', subtitleFile);
+            }
+            formData.append('language', document.getElementById('language').value);
+            formData.append('asr_model_size', 'tiny');
+            formData.append('enable_word_timestamps', 'false');
+            formData.append('export_formats', exportFormats.join(','));
+
+            const resp = await fetch(`${API_BASE}/upload/process`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
+                body: formData,
             });
+
+            if (!resp.ok) {
+                const errorText = await resp.text();
+                throw new Error(errorText || `HTTP ${resp.status}`);
+            }
 
             const data = await resp.json();
             activeTaskId = data.task_id;
@@ -74,6 +90,11 @@ function initProcessForm() {
                 displayResult(result);
                 btn.disabled = false;
                 btn.textContent = '🚀 开始处理';
+            }, (taskId, status) => {
+                if (status.status === 'failed' && activeTaskId === taskId) {
+                    btn.disabled = false;
+                    btn.textContent = '🚀 开始处理';
+                }
             });
 
         } catch (err) {
@@ -84,8 +105,15 @@ function initProcessForm() {
     });
 }
 
+function getFileSuffix(filename) {
+    const index = filename.lastIndexOf('.');
+    return index >= 0 ? filename.slice(index).toLowerCase() : '';
+}
+
 function initBatchForm() {
     const form = document.getElementById('batch-form');
+    if (!form) return;
+
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
@@ -265,9 +293,36 @@ function displayResult(result) {
     }
 
     if (result.knowledge_tree) {
-        html += '<div class="result-section"><h3>🌳 知识框架</h3>';
+        html += '<div class="result-section"><h3>🌳 时间戳知识树</h3>';
         html += renderTree(result.knowledge_tree, true);
         html += '</div>';
+    }
+
+    if (result.interview_questions && result.interview_questions.length > 0) {
+        html += '<div class="result-section"><h3>💬 面试问答</h3>';
+        result.interview_questions.forEach((item, index) => {
+            html += `
+              <div class="qa-item">
+                <div class="qa-question">Q${index + 1}. ${escapeHtml(item.question || '')}</div>
+                ${item.timestamp ? `<div class="timestamp">${escapeHtml(item.timestamp.label)}</div>` : ''}
+                <div class="qa-answer">${escapeHtml(item.answer || '')}</div>
+                ${item.evidence ? `<div class="evidence">原文依据：${escapeHtml(item.evidence)}</div>` : ''}
+              </div>`;
+        });
+        html += '</div>';
+    }
+
+    if (result.flashcards && result.flashcards.length > 0) {
+        html += '<div class="result-section"><h3>🃏 复习卡片</h3><div class="flashcard-grid">';
+        result.flashcards.forEach((card) => {
+            html += `
+              <div class="flashcard">
+                <div class="flashcard-front">${escapeHtml(card.front || '')}</div>
+                ${card.timestamp ? `<div class="timestamp">${escapeHtml(card.timestamp.label)}</div>` : ''}
+                <div class="flashcard-back">${escapeHtml(card.back || '')}</div>
+              </div>`;
+        });
+        html += '</div></div>';
     }
 
     if (result.exports) {
@@ -288,12 +343,15 @@ function renderTree(node, isRoot = false, depth = 0) {
     if (!node) return '';
 
     let html = `<div class="tree-node ${isRoot ? 'root' : ''}">`;
-    html += `<div class="tree-title">${node.title || ''}</div>`;
+    html += `<div class="tree-title">${escapeHtml(node.title || '')}</div>`;
+    if (node.timestamp_start !== undefined) {
+        html += `<div class="timestamp">${formatTimeRange(node.timestamp_start, node.timestamp_end)}</div>`;
+    }
     if (node.content) {
-        html += `<div class="tree-content">${node.content.substring(0, 200)}</div>`;
+        html += `<div class="tree-content">${escapeHtml(node.content.substring(0, 200))}</div>`;
     }
     if (node.keywords && node.keywords.length > 0) {
-        html += node.keywords.map(k => `<span class="keyword-tag">${k}</span>`).join(' ');
+        html += node.keywords.map(k => `<span class="keyword-tag">${escapeHtml(k)}</span>`).join(' ');
     }
 
     if (node.children && node.children.length > 0 && depth < 5) {
@@ -326,4 +384,25 @@ async function viewTaskResult(taskId) {
 
 function showError(msg) {
     alert(msg);
+}
+
+function formatTimeRange(start, end) {
+    return `${formatSeconds(start || 0)} - ${formatSeconds(end || start || 0)}`;
+}
+
+function formatSeconds(value) {
+    const total = Math.max(0, Math.floor(Number(value) || 0));
+    const h = String(Math.floor(total / 3600)).padStart(2, '0');
+    const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+    const s = String(total % 60).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
 }

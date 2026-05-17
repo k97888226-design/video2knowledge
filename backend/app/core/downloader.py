@@ -1,4 +1,5 @@
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -29,6 +30,13 @@ class VideoDownloader:
         self.download_dir = settings.DOWNLOAD_DIR
         self.download_dir.mkdir(parents=True, exist_ok=True)
 
+    def _base_ydl_opts(self) -> dict:
+        return {
+            "quiet": True,
+            "no_warnings": True,
+            "proxy": settings.YTDLP_PROXY,
+        }
+
     def detect_platform(self, url: str) -> str:
         """检测视频平台类型"""
         parsed = urlparse(url)
@@ -44,11 +52,14 @@ class VideoDownloader:
     def extract_video_id(self, url: str, platform: str) -> Optional[str]:
         """从URL提取视频ID"""
         if platform == "bilibili":
+            parsed = urlparse(url)
+            if parsed.netloc.lower() == "b23.tv":
+                return parsed.path.strip("/").split("/")[0] or None
+
             for pattern in self.BILIBILI_VIDEO_PATTERNS:
                 match = pattern.search(url)
                 if match:
                     return match.group(0)
-            parsed = urlparse(url)
             params = parse_qs(parsed.query)
             if "bvid" in params:
                 return params["bvid"][0]
@@ -67,8 +78,7 @@ class VideoDownloader:
     def get_video_info(self, url: str) -> dict:
         """获取视频元信息（不下载）"""
         ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
+            **self._base_ydl_opts(),
             "extract_flat": False,
         }
 
@@ -100,6 +110,7 @@ class VideoDownloader:
         output_template = str(output_dir / "%(title)s_%(id)s.%(ext)s")
 
         ydl_opts = {
+            **self._base_ydl_opts(),
             "format": "bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
@@ -107,8 +118,6 @@ class VideoDownloader:
                 "preferredquality": "192",
             }],
             "outtmpl": output_template,
-            "quiet": True,
-            "no_warnings": True,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -142,11 +151,10 @@ class VideoDownloader:
         output_template = str(output_dir / "%(title)s_%(id)s.%(ext)s")
 
         ydl_opts = {
+            **self._base_ydl_opts(),
             "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
             "merge_output_format": "mp4",
             "outtmpl": output_template,
-            "quiet": True,
-            "no_warnings": True,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -180,13 +188,12 @@ class VideoDownloader:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         ydl_opts = {
+            **self._base_ydl_opts(),
             "writesubtitles": True,
             "writeautomaticsub": True,
             "subtitleslangs": langs,
             "skip_download": True,
             "outtmpl": str(output_dir / "%(title)s_%(id)s.%(ext)s"),
-            "quiet": True,
-            "no_warnings": True,
         }
 
         subtitle_files = {}
@@ -214,9 +221,16 @@ class VideoDownloader:
         video_path = Path(video_path)
         audio_path = video_path.with_suffix(".wav")
 
+        ffmpeg_path = self._find_ffmpeg()
+        if not ffmpeg_path:
+            raise RuntimeError(
+                "未检测到 ffmpeg。单独上传视频文件需要 ffmpeg 提取音频；"
+                "请先安装 ffmpeg，或安装 Python 包 imageio-ffmpeg，或上传字幕文件/视频+字幕文件。"
+            )
+
         try:
             cmd = [
-                "ffmpeg", "-i", str(video_path),
+                ffmpeg_path, "-i", str(video_path),
                 "-vn", "-acodec", "pcm_s16le",
                 "-ar", "16000", "-ac", "1",
                 "-y", str(audio_path),
@@ -231,11 +245,23 @@ class VideoDownloader:
                 "channels": 1,
             }
         except subprocess.CalledProcessError as e:
-            logger.error(f"音频分离失败: {e}")
-            raise
-        except FileNotFoundError:
-            logger.error("ffmpeg未安装，请先安装ffmpeg")
-            raise
+            stderr = e.stderr.decode("utf-8", errors="ignore").strip()
+            message = stderr or str(e)
+            logger.error(f"音频分离失败: {message}")
+            raise RuntimeError(f"ffmpeg 提取音频失败: {message}") from e
+
+    def _find_ffmpeg(self) -> Optional[str]:
+        """Find ffmpeg from PATH, then from imageio-ffmpeg if available."""
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path:
+            return ffmpeg_path
+
+        try:
+            import imageio_ffmpeg
+        except ImportError:
+            return None
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
 
     def _detect_subtitle_lang(self, filename: str) -> str:
         """从文件名检测字幕语言"""

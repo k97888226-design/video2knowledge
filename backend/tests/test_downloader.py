@@ -1,4 +1,5 @@
 import tempfile
+import uuid
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -71,6 +72,13 @@ class TestVideoDownloader:
             "https://example.com/video", "generic"
         )
         assert video_id is None
+
+    def test_separate_audio_video_requires_ffmpeg(self, downloader):
+        video_path = downloader.download_dir / f"{uuid.uuid4().hex}.mp4"
+
+        with patch.object(downloader, "_find_ffmpeg", return_value=None):
+            with pytest.raises(RuntimeError, match="ffmpeg"):
+                downloader.separate_audio_video(str(video_path))
 
     def test_get_video_info_mock(self, downloader):
         with patch.object(downloader, "get_video_info") as mock_info:

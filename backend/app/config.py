@@ -32,13 +32,18 @@ class Settings(BaseSettings):
     BILIBILI_SESSDATA: str = ""
     BILIBILI_BUVID3: str = ""
 
+    # Empty string forces yt-dlp to ignore inherited HTTP_PROXY/HTTPS_PROXY.
+    # Set this in .env when a proxy is needed, e.g. http://127.0.0.1:7897
+    YTDLP_PROXY: str = ""
+
     API_PREFIX: str = "/api/v1"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+    }
 
 
 settings = Settings()

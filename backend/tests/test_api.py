@@ -92,6 +92,89 @@ class TestAPIRoutes:
         )
         assert response.status_code == 422
 
+    @patch("app.api.routes._process_upload_pipeline")
+    def test_process_upload_subtitle_file(self, mock_pipeline, client):
+        mock_pipeline.return_value = None
+
+        response = client.post(
+            "/api/v1/upload/process",
+            data={
+                "language": "zh",
+                "asr_model_size": "tiny",
+                "export_formats": "markdown,json",
+            },
+            files={
+                "file": (
+                    "sample.srt",
+                    b"1\n00:00:01,000 --> 00:00:03,500\nsample subtitle\n",
+                    "application/x-subrip",
+                )
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "task_id" in data
+        assert data["status"] == "pending"
+
+    @patch("app.api.routes._process_upload_pipeline")
+    def test_process_upload_rejects_unknown_file_type(self, mock_pipeline, client):
+        response = client.post(
+            "/api/v1/upload/process",
+            data={"language": "zh"},
+            files={
+                "file": (
+                    "sample.txt",
+                    b"plain text",
+                    "text/plain",
+                )
+            },
+        )
+
+        assert response.status_code == 400
+        mock_pipeline.assert_not_called()
+
+    @patch("app.api.routes._process_upload_pipeline")
+    def test_process_upload_video_requires_subtitle(self, mock_pipeline, client):
+        response = client.post(
+            "/api/v1/upload/process",
+            data={"language": "zh"},
+            files={
+                "file": (
+                    "sample.mp4",
+                    b"not a real video",
+                    "video/mp4",
+                )
+            },
+        )
+
+        assert response.status_code == 400
+        assert "字幕" in response.json()["detail"]
+        mock_pipeline.assert_not_called()
+
+    @patch("app.api.routes._process_upload_pipeline")
+    def test_process_upload_video_with_subtitle_file(self, mock_pipeline, client):
+        mock_pipeline.return_value = None
+
+        response = client.post(
+            "/api/v1/upload/process",
+            data={
+                "language": "zh",
+                "export_formats": "markdown,json",
+            },
+            files={
+                "file": ("sample.mp4", b"not a real video", "video/mp4"),
+                "subtitle_file": (
+                    "sample.srt",
+                    b"1\n00:00:01,000 --> 00:00:03,500\nsample subtitle\n",
+                    "application/x-subrip",
+                ),
+            },
+        )
+
+        assert response.status_code == 200
+        assert "task_id" in response.json()
+
     @patch("app.api.routes._process_subtitle_pipeline")
     def test_process_subtitle(self, mock_pipeline, client):
         mock_pipeline.return_value = None
@@ -240,4 +323,5 @@ class TestAPIRoutes:
         assert "paths" in schema
         assert "/api/v1/health" in schema["paths"]
         assert "/api/v1/video/process" in schema["paths"]
+        assert "/api/v1/upload/process" in schema["paths"]
         assert "/api/v1/batch/process" in schema["paths"]

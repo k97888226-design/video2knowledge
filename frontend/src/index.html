@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Video2Knowledge - 视频内容转知识框架</title>
+<title>Video2Knowledge - 字幕转学习包</title>
 <link rel="stylesheet" href="styles/main.css">
 </head>
 <body>
@@ -11,27 +11,31 @@
   <header class="app-header">
     <div class="header-content">
       <h1>🎬 Video2Knowledge</h1>
-      <p class="subtitle">视频内容智能转知识框架系统</p>
+      <p class="subtitle">字幕驱动的时间戳知识树、面试问答与复习卡片</p>
     </div>
   </header>
 
   <main class="app-main">
     <div class="tabs">
-      <button class="tab-btn active" data-tab="process">🎯 视频处理</button>
-      <button class="tab-btn" data-tab="batch">📦 批量处理</button>
+      <button class="tab-btn active" data-tab="process">🎯 生成学习包</button>
       <button class="tab-btn" data-tab="results">📋 处理结果</button>
       <button class="tab-btn" data-tab="api">🔌 API文档</button>
     </div>
 
     <section id="tab-process" class="tab-content active">
       <div class="card">
-        <h2>处理视频</h2>
-        <form id="process-form">
+        <h2>生成学习包</h2>
+        <form id="process-form" enctype="multipart/form-data">
           <div class="form-group">
-            <label for="video-url">视频 URL</label>
-            <input type="url" id="video-url" placeholder="粘贴Bilibili/YouTube等视频链接..."
-                   required>
-            <span class="hint">支持Bilibili (BV/av号, b23.tv短链)、YouTube等主流平台</span>
+            <label for="media-file">主文件（字幕，或带字幕的视频）</label>
+            <input type="file" id="media-file" accept=".mp4,.mov,.mkv,.avi,.webm,.flv,.mp3,.wav,.m4a,.flac,.aac,.ogg,.srt,.vtt,.ass,.ssa,.json">
+            <span class="hint">推荐直接上传 .srt/.vtt/.ass/.json；如果选择视频或音频，请同时选择字幕文件。</span>
+          </div>
+
+          <div class="form-group">
+            <label for="subtitle-file">配套字幕文件</label>
+            <input type="file" id="subtitle-file" accept=".srt,.vtt,.ass,.ssa,.json">
+            <span class="hint">视频+字幕会优先使用字幕生成时间戳知识树，不走平台下载和语音识别。</span>
           </div>
 
           <div class="form-row">
@@ -46,31 +50,13 @@
                 <option value="ko">韩语</option>
               </select>
             </div>
-            <div class="form-group">
-              <label for="asr-model">ASR模型</label>
-              <select id="asr-model">
-                <option value="tiny">Tiny (快速)</option>
-                <option value="base">Base</option>
-                <option value="small">Small</option>
-                <option value="medium" selected>Medium (推荐)</option>
-                <option value="large-v3">Large-v3 (最高精度)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="summary-method">摘要方式</label>
-              <select id="summary-method">
-                <option value="hybrid" selected>混合模式 (推荐)</option>
-                <option value="extractive">抽取式</option>
-                <option value="abstractive">生成式</option>
-              </select>
-            </div>
           </div>
 
           <div class="form-group">
-            <label>导出格式</label>
+            <label>导出内容</label>
             <div class="checkbox-group">
               <label class="checkbox-label">
-                <input type="checkbox" name="export-format" value="markdown" checked> Markdown
+                <input type="checkbox" name="export-format" value="markdown" checked> Markdown 学习包
               </label>
               <label class="checkbox-label">
                 <input type="checkbox" name="export-format" value="json" checked> JSON
@@ -87,17 +73,8 @@
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="use-asr" checked> 无字幕时启用语音识别
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="generate-mindmap" checked> 生成思维导图
-            </label>
-          </div>
-
           <button type="submit" class="btn btn-primary" id="process-btn">
-            🚀 开始处理
+            🚀 生成学习包
           </button>
         </form>
 
@@ -113,44 +90,6 @@
       <div id="process-result" class="card hidden">
         <h2>处理结果</h2>
         <div id="result-content"></div>
-      </div>
-    </section>
-
-    <section id="tab-batch" class="tab-content">
-      <div class="card">
-        <h2>批量处理</h2>
-        <form id="batch-form">
-          <div class="form-group">
-            <label for="batch-urls">视频URL列表（每行一个）</label>
-            <textarea id="batch-urls" rows="6" placeholder="https://www.bilibili.com/video/BV1xx411c7mD&#10;https://www.bilibili.com/video/BV1GJ411x7h7&#10;..."></textarea>
-            <span class="hint">最多支持一次提交20个视频</span>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label for="batch-language">语言</label>
-              <select id="batch-language">
-                <option value="auto">自动检测</option>
-                <option value="zh">中文普通话</option>
-                <option value="en">英语</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="batch-model">ASR模型</label>
-              <select id="batch-model">
-                <option value="medium" selected>Medium</option>
-                <option value="large-v3">Large-v3</option>
-              </select>
-            </div>
-          </div>
-
-          <button type="submit" class="btn btn-primary">📦 批量处理</button>
-        </form>
-
-        <div id="batch-progress" class="progress-section hidden">
-          <h3>批量任务进度</h3>
-          <div id="batch-task-list"></div>
-        </div>
       </div>
     </section>
 
@@ -180,23 +119,17 @@
             <pre><code>curl -X POST "http://localhost:8000/api/v1/video/info?url=VIDEO_URL"</code></pre>
           </div>
           <div class="api-endpoint">
-            <h3><span class="method post">POST</span> /api/v1/video/process</h3>
-            <p>处理视频（异步任务）</p>
-            <pre><code>curl -X POST http://localhost:8000/api/v1/video/process \
-  -H "Content-Type: application/json" \
-  -d '{"url": "VIDEO_URL", "language": "auto", "export_formats": ["markdown", "json"]}'</code></pre>
+            <h3><span class="method post">POST</span> /api/v1/upload/process</h3>
+            <p>上传字幕，或上传视频并附带字幕（异步任务）</p>
+            <pre><code>curl -X POST http://localhost:8000/api/v1/upload/process \
+  -F "file=@./sample.srt" \
+  -F "language=zh" \
+  -F "export_formats=markdown,json"</code></pre>
           </div>
           <div class="api-endpoint">
             <h3><span class="method get">GET</span> /api/v1/task/{task_id}</h3>
             <p>查询任务状态</p>
             <pre><code>curl http://localhost:8000/api/v1/task/TASK_ID</code></pre>
-          </div>
-          <div class="api-endpoint">
-            <h3><span class="method post">POST</span> /api/v1/batch/process</h3>
-            <p>批量处理视频</p>
-            <pre><code>curl -X POST http://localhost:8000/api/v1/batch/process \
-  -H "Content-Type: application/json" \
-  -d '{"urls": ["URL1", "URL2"], "language": "auto"}'</code></pre>
           </div>
         </div>
         <p class="hint">完整API文档请访问: <a href="/docs" target="_blank">Swagger UI</a> | <a href="/redoc" target="_blank">ReDoc</a></p>
@@ -205,7 +138,7 @@
   </main>
 
   <footer class="app-footer">
-    <p>Video2Knowledge v1.0.0 | MIT License | Powered by Whisper + Transformers</p>
+    <p>Video2Knowledge v1.0.0 | MIT License | 字幕驱动学习包生成</p>
   </footer>
 </div>
 

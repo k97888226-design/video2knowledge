@@ -1,9 +1,10 @@
+import re
 import uuid
 import asyncio
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from loguru import logger
 
@@ -17,6 +18,7 @@ from .schemas import (
     HealthResponse,
     TaskStatus,
     ExportFormat,
+    LanguageCode,
 )
 from ..config import settings
 from ..core.downloader import downloader
@@ -29,6 +31,11 @@ from ..core.knowledge_builder import knowledge_builder
 api_router = APIRouter(prefix=settings.API_PREFIX)
 
 task_store: dict[str, dict] = {}
+
+SUBTITLE_SUFFIXES = {".srt", ".ass", ".ssa", ".vtt", ".json"}
+AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
+VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv"}
+UPLOAD_SUFFIXES = SUBTITLE_SUFFIXES | AUDIO_SUFFIXES | VIDEO_SUFFIXES
 
 
 def _create_task() -> dict:
@@ -48,6 +55,63 @@ def _create_task() -> dict:
 def _update_task(task_id: str, **kwargs):
     if task_id in task_store:
         task_store[task_id].update(kwargs)
+
+
+def _parse_language(value: str) -> LanguageCode:
+    try:
+        return LanguageCode(value)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"Unsupported language: {value}")
+
+
+def _parse_export_formats(value: str) -> list[ExportFormat]:
+    values = [item.strip() for item in value.split(",") if item.strip()]
+    if not values:
+        values = [ExportFormat.MARKDOWN.value, ExportFormat.JSON.value]
+
+    try:
+        return [ExportFormat(item) for item in values]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Unsupported export format: {exc}")
+
+
+async def _save_upload_file(
+    upload: UploadFile,
+    allowed_suffixes: set[str],
+) -> Path:
+    filename = Path(upload.filename or "upload").name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in allowed_suffixes:
+        allowed = ", ".join(sorted(allowed_suffixes))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{suffix}'. Allowed: {allowed}",
+        )
+
+    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(filename).stem).strip("._")
+    safe_stem = safe_stem or "upload"
+    upload_dir = settings.TEMP_DIR / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    output_path = upload_dir / f"{uuid.uuid4().hex}_{safe_stem}{suffix}"
+
+    max_bytes = settings.MAX_VIDEO_SIZE_MB * 1024 * 1024
+    size = 0
+    with open(output_path, "wb") as output:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_bytes:
+                output_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds {settings.MAX_VIDEO_SIZE_MB} MB limit",
+                )
+            output.write(chunk)
+
+    await upload.close()
+    return output_path
 
 
 @api_router.get("/health", response_model=HealthResponse)
@@ -83,6 +147,57 @@ async def process_video(
         _process_video_pipeline,
         task["task_id"],
         request,
+    )
+
+    return TaskResponse(**task)
+
+
+@api_router.post("/upload/process", response_model=TaskResponse)
+async def process_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    subtitle_file: Optional[UploadFile] = File(None),
+    language: str = Form("auto"),
+    asr_model_size: str = Form("tiny"),
+    enable_word_timestamps: bool = Form(False),
+    export_formats: str = Form("markdown,json"),
+):
+    """Process a local subtitle, audio, or video upload."""
+    language_code = _parse_language(language)
+    formats = _parse_export_formats(export_formats)
+    media_path = await _save_upload_file(file, UPLOAD_SUFFIXES)
+    suffix = media_path.suffix.lower()
+
+    sidecar_subtitle_path = None
+    if subtitle_file and subtitle_file.filename:
+        sidecar_subtitle_path = await _save_upload_file(subtitle_file, SUBTITLE_SUFFIXES)
+
+    if suffix in SUBTITLE_SUFFIXES:
+        source_type = "subtitle"
+    elif suffix in AUDIO_SUFFIXES:
+        source_type = "audio"
+    elif suffix in VIDEO_SUFFIXES:
+        source_type = "video"
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported upload type")
+
+    if source_type in {"audio", "video"} and not sidecar_subtitle_path:
+        raise HTTPException(
+            status_code=400,
+            detail="稳定模式需要字幕文件：请上传字幕文件，或上传视频时同时选择字幕文件。",
+        )
+
+    task = _create_task()
+    background_tasks.add_task(
+        _process_upload_pipeline,
+        task["task_id"],
+        str(media_path),
+        source_type,
+        language_code,
+        asr_model_size,
+        enable_word_timestamps,
+        formats,
+        str(sidecar_subtitle_path) if sidecar_subtitle_path else None,
     )
 
     return TaskResponse(**task)
@@ -159,9 +274,13 @@ async def _process_video_pipeline(task_id: str, request: VideoProcessRequest):
         )
 
         result = knowledge_builder.build_from_segments(
-            segments, request.language.value
+            segments,
+            request.language.value,
+            export_formats=[fmt.value for fmt in request.export_formats],
         ) if segments else knowledge_builder.build(
-            "\n\n".join(paragraph_input), request.language.value
+            "\n\n".join(paragraph_input),
+            request.language.value,
+            export_formats=[fmt.value for fmt in request.export_formats],
         )
 
         exports = {}
@@ -180,6 +299,8 @@ async def _process_video_pipeline(task_id: str, request: VideoProcessRequest):
                 "summary": result.get("summary", ""),
                 "keywords": result.get("keywords", []),
                 "statistics": result.get("statistics", {}),
+                "interview_questions": result.get("interview_questions", []),
+                "flashcards": result.get("flashcards", []),
                 "segments": segments[:50],
                 "exports": exports,
             }
@@ -190,6 +311,150 @@ async def _process_video_pipeline(task_id: str, request: VideoProcessRequest):
 
     except Exception as e:
         logger.error(f"任务 {task_id} 失败: {e}")
+        _update_task(
+            task_id,
+            status=TaskStatus.FAILED,
+            progress=0,
+            message="处理失败",
+            error=str(e),
+        )
+
+
+async def _process_upload_pipeline(
+    task_id: str,
+    media_path: str,
+    source_type: str,
+    language: LanguageCode,
+    asr_model_size: str,
+    enable_word_timestamps: bool,
+    export_formats: list[ExportFormat],
+    subtitle_path: Optional[str] = None,
+):
+    """Process an uploaded local file without downloading from a platform."""
+    media_file = Path(media_path)
+    subtitle_file = Path(subtitle_path) if subtitle_path else None
+    effective_language = language.value if language.value != "auto" else "zh"
+
+    try:
+        if not media_file.exists():
+            raise FileNotFoundError(f"File not found: {media_file}")
+        if subtitle_file and not subtitle_file.exists():
+            raise FileNotFoundError(f"Subtitle file not found: {subtitle_file}")
+
+        transcript_text = ""
+        segments = []
+        asr_info = {}
+
+        if source_type == "subtitle" or subtitle_file:
+            source = subtitle_file or media_file
+            _update_task(
+                task_id,
+                status=TaskStatus.PROCESSING,
+                progress=20,
+                message="正在解析字幕文件...",
+            )
+            entries = subtitle_parser.parse(str(source))
+            transcript_text = subtitle_parser.get_full_text(entries)
+            segments = [
+                {"text": entry.text, "start": entry.start, "end": entry.end}
+                for entry in entries
+            ]
+        else:
+            audio_path = media_file
+            if source_type == "video":
+                _update_task(
+                    task_id,
+                    status=TaskStatus.PROCESSING,
+                    progress=15,
+                    message="正在从视频中提取音频...",
+                )
+                separated = downloader.separate_audio_video(str(media_file))
+                audio_path = Path(separated["audio_path"])
+
+            _update_task(
+                task_id,
+                status=TaskStatus.TRANSCRIBING,
+                progress=35,
+                message="正在进行语音识别...",
+            )
+            asr_engine.load_model(asr_model_size)
+            transcribe_language = None if language.value == "auto" else language.value
+            if enable_word_timestamps:
+                asr_result = asr_engine.transcribe_with_word_timestamps(
+                    str(audio_path),
+                    language=transcribe_language,
+                )
+            else:
+                asr_result = asr_engine.transcribe(
+                    str(audio_path),
+                    language=transcribe_language,
+                )
+
+            transcript_text = asr_result.get("text", "")
+            segments = asr_result.get("segments", [])
+            detected_language = asr_result.get("language")
+            if (
+                language.value == "auto"
+                and detected_language in settings.SUPPORTED_LANGUAGES
+            ):
+                effective_language = detected_language
+            asr_info = {
+                "language": detected_language,
+                "language_probability": asr_result.get("language_probability"),
+                "duration_seconds": asr_result.get("duration_seconds"),
+                "engine": asr_result.get("engine"),
+                "model_size": asr_result.get("model_size"),
+                "rtf": asr_result.get("rtf"),
+            }
+
+        if not transcript_text:
+            raise Exception("未能从上传文件中获取文本内容")
+
+        _update_task(task_id, progress=60, message="正在清洗文本...")
+        cleaned_text = text_cleaner.clean(transcript_text, effective_language)
+
+        _update_task(
+            task_id,
+            status=TaskStatus.SUMMARIZING,
+            progress=80,
+            message="正在生成知识框架...",
+        )
+        result = knowledge_builder.build_from_segments(
+            segments,
+            effective_language,
+            export_formats=[fmt.value for fmt in export_formats],
+        ) if segments else knowledge_builder.build(
+            cleaned_text,
+            effective_language,
+            export_formats=[fmt.value for fmt in export_formats],
+        )
+
+        _update_task(
+            task_id,
+            status=TaskStatus.COMPLETED,
+            progress=100,
+            message="处理完成",
+            result={
+                "title": media_file.stem,
+                "source_type": source_type,
+                "file_name": media_file.name,
+                "asr_info": asr_info,
+                "knowledge_tree": result.get("knowledge_tree", {}),
+                "summary": result.get("summary", ""),
+                "keywords": result.get("keywords", []),
+                "statistics": result.get("statistics", {}),
+                "interview_questions": result.get("interview_questions", []),
+                "flashcards": result.get("flashcards", []),
+                "segments": segments[:100],
+                "exports": {
+                    fmt.value: result.get("exports", {}).get(fmt.value, "")
+                    for fmt in export_formats
+                },
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"上传任务 {task_id} 失败: {e}")
         _update_task(
             task_id,
             status=TaskStatus.FAILED,
@@ -262,7 +527,9 @@ async def _process_subtitle_pipeline(task_id: str, request: SubtitleProcessReque
         ]
 
         result = knowledge_builder.build_from_segments(
-            segments, request.language.value
+            segments,
+            request.language.value,
+            export_formats=[fmt.value for fmt in request.export_formats],
         )
 
         _update_task(
@@ -276,6 +543,8 @@ async def _process_subtitle_pipeline(task_id: str, request: SubtitleProcessReque
                 "summary": result.get("summary", ""),
                 "keywords": result.get("keywords", []),
                 "statistics": result.get("statistics", {}),
+                "interview_questions": result.get("interview_questions", []),
+                "flashcards": result.get("flashcards", []),
                 "exports": {
                     fmt.value: result.get("exports", {}).get(fmt.value, "")
                     for fmt in request.export_formats
@@ -347,9 +616,13 @@ async def _process_audio_pipeline(task_id: str, request: AudioProcessRequest):
                      message="正在生成知识框架...")
 
         result = knowledge_builder.build_from_segments(
-            segments, request.language.value
+            segments,
+            request.language.value,
+            export_formats=[fmt.value for fmt in request.export_formats],
         ) if segments else knowledge_builder.build(
-            cleaned_text, request.language.value
+            cleaned_text,
+            request.language.value,
+            export_formats=[fmt.value for fmt in request.export_formats],
         )
 
         _update_task(
@@ -371,6 +644,8 @@ async def _process_audio_pipeline(task_id: str, request: AudioProcessRequest):
                 "summary": result.get("summary", ""),
                 "keywords": result.get("keywords", []),
                 "statistics": result.get("statistics", {}),
+                "interview_questions": result.get("interview_questions", []),
+                "flashcards": result.get("flashcards", []),
                 "segments": segments[:100],
                 "exports": {
                     fmt.value: result.get("exports", {}).get(fmt.value, "")

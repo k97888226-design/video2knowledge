@@ -196,7 +196,7 @@ class TextCleaner:
     def _split_sentences(self, text: str, language: str) -> list[str]:
         """分句"""
         if language == "zh":
-            text = re.sub(r"([。！？!?\n])([^。！？!?\n])", r"\1\n\2", text)
+            text = re.sub(r"([。.!！？?\n])([^。.!！？?\n])", r"\1\n\2", text)
             text = re.sub(r"([，,;；])([^，,;；])", r"\1 \2", text)
         else:
             text = re.sub(r"([.!?])\s+([A-Z])", r"\1\n\2", text)

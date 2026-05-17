@@ -9,7 +9,7 @@
 | 内存 | 64GB DDR5 |
 | 存储 | NVMe SSD 2TB |
 | 操作系统 | Ubuntu 22.04 LTS |
-| Python | 3.11 |
+| Python | 3.14.5 |
 | CUDA | 12.1 |
 | FFmpeg | 6.1 |
 

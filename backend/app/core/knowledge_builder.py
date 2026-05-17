@@ -51,8 +51,14 @@ class KnowledgeBuilder:
             "exports": {},
         }
 
+        self._attach_learning_outputs(result, [])
         for fmt in export_formats:
-            result["exports"][fmt] = self._export(root, fmt)
+            if fmt == "markdown":
+                result["exports"][fmt] = self._export_result_markdown(result)
+            elif fmt == "json":
+                result["exports"][fmt] = self._export_result_json(result)
+            else:
+                result["exports"][fmt] = self._export(root, fmt)
 
         return result
 
@@ -61,11 +67,13 @@ class KnowledgeBuilder:
         segments: list[dict],
         language: str = "zh",
         include_timestamps: bool = True,
+        export_formats: Optional[list[str]] = None,
     ) -> dict:
         """从带时间戳的片段构建知识框架"""
         full_text = " ".join(seg.get("text", "") for seg in segments)
+        export_formats = export_formats or ["markdown", "markmap", "json"]
 
-        result = self.build(full_text, language)
+        result = self.build(full_text, language, export_formats=export_formats)
 
         if include_timestamps:
             self._add_timestamps_to_tree(
@@ -73,6 +81,8 @@ class KnowledgeBuilder:
                 segments,
             )
 
+        self._attach_learning_outputs(result, segments)
+        self._refresh_learning_exports(result, export_formats)
         return result
 
     def merge_multiple_sources(
@@ -143,6 +153,167 @@ class KnowledgeBuilder:
                 node["timestamp_start"] = seg.get("start", 0)
                 node["timestamp_end"] = seg.get("end", 0)
                 break
+
+    def _attach_learning_outputs(
+        self,
+        result: dict,
+        segments: list[dict],
+    ) -> None:
+        """Build interview questions and flashcards from the knowledge tree."""
+        nodes = self._flatten_tree(result.get("knowledge_tree", {}))
+        usable_nodes = [
+            node for node in nodes
+            if node.get("title") and node.get("content")
+        ]
+
+        if not usable_nodes and result.get("summary"):
+            usable_nodes = [{
+                "title": result.get("title", "核心内容"),
+                "content": result.get("summary", ""),
+                "keywords": result.get("keywords", []),
+            }]
+
+        interview_questions = []
+        flashcards = []
+
+        for node in usable_nodes[:8]:
+            evidence = self._evidence_for_node(node, segments)
+            timestamp = self._timestamp_for_node(node)
+            title = node.get("title", "").strip()
+            content = node.get("content", "").strip()
+            keywords = node.get("keywords", [])[:3]
+
+            interview_questions.append({
+                "question": f"请解释“{title}”的核心含义。",
+                "answer": content,
+                "evidence": evidence,
+                "timestamp": timestamp,
+                "keywords": keywords,
+            })
+
+        for node in usable_nodes[:12]:
+            evidence = self._evidence_for_node(node, segments)
+            timestamp = self._timestamp_for_node(node)
+            flashcards.append({
+                "front": node.get("title", "").strip(),
+                "back": node.get("content", "").strip(),
+                "evidence": evidence,
+                "timestamp": timestamp,
+                "tags": node.get("keywords", [])[:3],
+            })
+
+        result["interview_questions"] = interview_questions
+        result["flashcards"] = flashcards
+
+    def _flatten_tree(self, node: dict) -> list[dict]:
+        if not node:
+            return []
+
+        items = [node]
+        for child in node.get("children", []) or []:
+            items.extend(self._flatten_tree(child))
+        return items
+
+    def _timestamp_for_node(self, node: dict) -> Optional[dict]:
+        if "timestamp_start" not in node:
+            return None
+
+        start = float(node.get("timestamp_start", 0) or 0)
+        end = float(node.get("timestamp_end", start) or start)
+        return {
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "label": f"{self._format_time(start)} - {self._format_time(end)}",
+        }
+
+    def _evidence_for_node(self, node: dict, segments: list[dict]) -> str:
+        timestamp = self._timestamp_for_node(node)
+        if not timestamp:
+            return node.get("content", "")
+
+        start = timestamp["start"]
+        end = timestamp["end"]
+        nearby = [
+            seg.get("text", "").strip()
+            for seg in segments
+            if seg.get("text")
+            and float(seg.get("start", 0) or 0) <= end + 1
+            and float(seg.get("end", 0) or 0) >= max(0, start - 1)
+        ]
+        return " ".join(nearby[:3]) or node.get("content", "")
+
+    def _refresh_learning_exports(
+        self,
+        result: dict,
+        export_formats: list[str],
+    ) -> None:
+        if "markdown" in export_formats:
+            result["exports"]["markdown"] = self._export_result_markdown(result)
+        if "json" in export_formats:
+            result["exports"]["json"] = self._export_result_json(result)
+
+    def _export_result_json(self, result: dict) -> str:
+        payload = {key: value for key, value in result.items() if key != "exports"}
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def _export_result_markdown(self, result: dict) -> str:
+        lines = [f"# {result.get('title', '学习笔记')}", ""]
+
+        if result.get("summary"):
+            lines.extend(["## 摘要", "", result["summary"], ""])
+
+        if result.get("keywords"):
+            keywords = " | ".join(f"`{kw}`" for kw in result["keywords"][:10])
+            lines.extend([f"> 关键词: {keywords}", ""])
+
+        lines.extend(["## 时间戳知识树", ""])
+        lines.extend(self._render_tree_markdown(result.get("knowledge_tree", {})))
+        lines.append("")
+
+        lines.extend(["## 面试问答", ""])
+        for i, item in enumerate(result.get("interview_questions", []), 1):
+            lines.append(f"### Q{i}. {item.get('question', '')}")
+            if item.get("timestamp"):
+                lines.append(f"- 时间戳: {item['timestamp']['label']}")
+            lines.append(f"- 回答: {item.get('answer', '')}")
+            if item.get("evidence"):
+                lines.append(f"- 原文依据: {item['evidence']}")
+            lines.append("")
+
+        lines.extend(["## 复习卡片", ""])
+        for i, card in enumerate(result.get("flashcards", []), 1):
+            lines.append(f"### Card {i}: {card.get('front', '')}")
+            if card.get("timestamp"):
+                lines.append(f"- 时间戳: {card['timestamp']['label']}")
+            lines.append(f"- 答案: {card.get('back', '')}")
+            if card.get("evidence"):
+                lines.append(f"- 原文依据: {card['evidence']}")
+            lines.append("")
+
+        return "\n".join(lines).strip() + "\n"
+
+    def _render_tree_markdown(self, node: dict, depth: int = 0) -> list[str]:
+        if not node:
+            return []
+
+        indent = "  " * depth
+        timestamp = self._timestamp_for_node(node)
+        time_text = f" [{timestamp['label']}]" if timestamp else ""
+        lines = [f"{indent}- {node.get('title', '')}{time_text}"]
+        if node.get("content"):
+            lines.append(f"{indent}  {node['content']}")
+
+        for child in node.get("children", []) or []:
+            lines.extend(self._render_tree_markdown(child, depth + 1))
+
+        return lines
+
+    @staticmethod
+    def _format_time(seconds: float) -> str:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        return f"{h:02d}:{m:02d}:{s:02d}"
 
     def _export(self, root: SummaryPoint, format: str) -> str:
         """导出为指定格式"""
