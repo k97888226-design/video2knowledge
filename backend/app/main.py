@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
@@ -59,6 +60,9 @@ if frontend_dir.exists():
 
 @app.get("/")
 async def root():
+    if frontend_dir.exists():
+        return RedirectResponse(url="/ui/", status_code=307)
+
     return {
         "name": settings.PROJECT_NAME,
         "version": settings.PROJECT_VERSION,

@@ -52,10 +52,9 @@ class TestAPIRoutes:
         assert "asr_models_available" in data
 
     def test_root_endpoint(self, client):
-        response = client.get("/")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["name"] == "Video2Knowledge"
+        response = client.get("/", follow_redirects=False)
+        assert response.status_code == 307
+        assert response.headers["location"] == "/ui/"
 
     def test_get_video_info_bad_url(self, client):
         response = client.post(
