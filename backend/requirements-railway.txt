@@ -1,0 +1,11 @@
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+python-multipart==0.0.28
+yt-dlp==2026.3.17
+numpy==2.4.5
+pysrt==1.1.2
+jieba==0.42.1
+pydantic==2.13.4
+pydantic-settings==2.14.1
+loguru==0.7.3
+python-dotenv==1.2.2
