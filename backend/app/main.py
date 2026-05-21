@@ -53,14 +53,30 @@ app.add_middleware(
 
 app.include_router(api_router)
 
-frontend_dir = Path(__file__).parent.parent.parent / "frontend" / "src"
-if frontend_dir.exists():
+
+def _find_frontend_dir() -> Path | None:
+    backend_root = Path(__file__).resolve().parent.parent
+    repo_root = backend_root.parent
+    candidates = [
+        repo_root / "frontend" / "src",
+        backend_root / "static-ui",
+    ]
+
+    for candidate in candidates:
+        if (candidate / "index.html").exists():
+            return candidate
+
+    return None
+
+
+frontend_dir = _find_frontend_dir()
+if frontend_dir is not None:
     app.mount("/ui", StaticFiles(directory=str(frontend_dir), html=True), name="ui")
 
 
 @app.get("/")
 async def root():
-    if frontend_dir.exists():
+    if frontend_dir is not None:
         return RedirectResponse(url="/ui/", status_code=307)
 
     return {

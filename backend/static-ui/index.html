@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video2Knowledge - 字幕转学习包</title>
+<link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+<div id="app">
+  <header class="app-header">
+    <div class="header-content">
+      <h1>🎬 Video2Knowledge</h1>
+      <p class="subtitle">字幕驱动的时间戳知识树、面试问答与复习卡片</p>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="process">🎯 生成学习包</button>
+      <button class="tab-btn" data-tab="results">📋 处理结果</button>
+      <button class="tab-btn" data-tab="api">🔌 API文档</button>
+    </div>
+
+    <section id="tab-process" class="tab-content active">
+      <div class="card">
+        <h2>生成学习包</h2>
+        <form id="process-form" enctype="multipart/form-data">
+          <div class="form-group">
+            <label for="media-file">主文件（字幕，或带字幕的视频）</label>
+            <input type="file" id="media-file" accept=".mp4,.mov,.mkv,.avi,.webm,.flv,.mp3,.wav,.m4a,.flac,.aac,.ogg,.srt,.vtt,.ass,.ssa,.json">
+            <span class="hint">推荐直接上传 .srt/.vtt/.ass/.json；如果选择视频或音频，请同时选择字幕文件。</span>
+          </div>
+
+          <div class="form-group">
+            <label for="subtitle-file">配套字幕文件</label>
+            <input type="file" id="subtitle-file" accept=".srt,.vtt,.ass,.ssa,.json">
+            <span class="hint">视频+字幕会优先使用字幕生成时间戳知识树，不走平台下载和语音识别。</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="language">语言</label>
+              <select id="language">
+                <option value="auto">自动检测</option>
+                <option value="zh">中文普通话</option>
+                <option value="yue">粤语</option>
+                <option value="en">英语</option>
+                <option value="ja">日语</option>
+                <option value="ko">韩语</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>导出内容</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="export-format" value="markdown" checked> Markdown 学习包
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" name="export-format" value="json" checked> JSON
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" name="export-format" value="markmap"> 思维导图 (Markmap)
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" name="export-format" value="mermaid"> Mermaid
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" name="export-format" value="opml"> OPML
+              </label>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary" id="process-btn">
+            🚀 生成学习包
+          </button>
+        </form>
+
+        <div id="process-progress" class="progress-section hidden">
+          <div class="progress-bar-container">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <p class="progress-text" id="progress-text"></p>
+          <p class="progress-status" id="progress-status"></p>
+        </div>
+      </div>
+
+      <div id="process-result" class="card hidden">
+        <h2>处理结果</h2>
+        <div id="result-content"></div>
+      </div>
+    </section>
+
+    <section id="tab-results" class="tab-content">
+      <div class="card">
+        <h2>处理结果列表</h2>
+        <div class="toolbar">
+          <button class="btn btn-secondary" id="refresh-tasks">🔄 刷新</button>
+          <button class="btn btn-secondary" id="clear-tasks">🗑️ 清除已完成</button>
+        </div>
+        <div id="task-list"></div>
+      </div>
+    </section>
+
+    <section id="tab-api" class="tab-content">
+      <div class="card">
+        <h2>API 接口文档</h2>
+        <div class="api-doc">
+          <div class="api-endpoint">
+            <h3><span class="method get">GET</span> /api/v1/health</h3>
+            <p>系统健康检查</p>
+            <pre><code>curl http://localhost:8000/api/v1/health</code></pre>
+          </div>
+          <div class="api-endpoint">
+            <h3><span class="method post">POST</span> /api/v1/video/info</h3>
+            <p>获取视频信息</p>
+            <pre><code>curl -X POST "http://localhost:8000/api/v1/video/info?url=VIDEO_URL"</code></pre>
+          </div>
+          <div class="api-endpoint">
+            <h3><span class="method post">POST</span> /api/v1/upload/process</h3>
+            <p>上传字幕，或上传视频并附带字幕（异步任务）</p>
+            <pre><code>curl -X POST http://localhost:8000/api/v1/upload/process \
+  -F "file=@./sample.srt" \
+  -F "language=zh" \
+  -F "export_formats=markdown,json"</code></pre>
+          </div>
+          <div class="api-endpoint">
+            <h3><span class="method get">GET</span> /api/v1/task/{task_id}</h3>
+            <p>查询任务状态</p>
+            <pre><code>curl http://localhost:8000/api/v1/task/TASK_ID</code></pre>
+          </div>
+        </div>
+        <p class="hint">完整API文档请访问: <a href="/docs" target="_blank">Swagger UI</a> | <a href="/redoc" target="_blank">ReDoc</a></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>Video2Knowledge v1.0.0 | MIT License | 字幕驱动学习包生成</p>
+  </footer>
+</div>
+
+<script src="scripts/app.js"></script>
+</body>
+</html>
